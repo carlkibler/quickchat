@@ -72,9 +72,10 @@ class PubProtocol(basic.LineReceiver, RedisConnectorMixin):
         if not self.current_processor or self.current_processor.isFinished():
             if not self.processors:
                 self.respondToUser("Closing connection")
-            self.current_processor = self.processors.pop(0)
-            self.log(logging.INFO, "Activating {} processor".format(self.current_processor.log_key))
-            self.current_processor.activate()
+            else:
+                self.current_processor = self.processors.pop(0)
+                self.log(logging.INFO, "Activating {} processor".format(self.current_processor.log_key))
+                self.current_processor.activate()
 
     def respondToUser(self, msg):
         """Log messages sent to user before transmitting"""
@@ -113,7 +114,7 @@ if __name__ == '__main__':
     logger.info("Starting server on port 9399")
     factory = ClientFactory()
     endpoints.serverFromString(reactor, "tcp:{}".format(SERVER['PORT'])).listen(factory)
-    if '-clear' in sys.argv:
+    if '-noclear' not in sys.argv:
         print("Clearing redis DB")
         logger.info("Clearing redis DB")
         factory.reset_db()
