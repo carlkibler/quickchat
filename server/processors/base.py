@@ -46,6 +46,9 @@ class BaseProcessor(object):
     def send(self, line):
         self.user_handler.respondToUser(line)
 
+    def stop(self):
+        pass
+
     @property
     def username(self):
         return self.user_handler.username

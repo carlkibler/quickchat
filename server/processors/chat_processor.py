@@ -2,10 +2,19 @@
 
 import logging
 import json
-from .base import BaseProcessor
-import arrow
-from .mixins import NickCommandsMixin
 import inspect
+
+import arrow
+
+from .base import BaseProcessor
+from .mixins import NickCommandsMixin
+
+
+
+# Message action types
+TALK = 'talk'
+JOIN = 'join'
+LEAVE = 'leave'
 
 
 class ChatProcessor(BaseProcessor, NickCommandsMixin):
@@ -21,11 +30,14 @@ class ChatProcessor(BaseProcessor, NickCommandsMixin):
         self.finished = False
         self.channel = None
 
+    def stop(self):
+        self.do_leave()
+        if self.thread:
+            self.thread.stop()
+        self.pubsub.punsubscribe('*')
+
     def __del__(self):
-        self.pubsub.stop()
-        redis = getattr(self, 'redis', None)
-        if redis and self.channel:
-            redis.srem(self.channel, self.username)
+        self.stop()
 
     def process(self, line):
         """Differentiate and handle commands and text messages"""
@@ -41,10 +53,10 @@ class ChatProcessor(BaseProcessor, NickCommandsMixin):
         else:
             self.publishMessage(msg)
 
-    def publishMessage(self, message):
+    def publishMessage(self, message, action=TALK):
         if self.channel:
             self.log(logging.INFO, "Sent message to {}: {}".format(self.channel, message))
-            self.redis.publish(self.channel, self._packageMsg(message))
+            self.redis.publish(self.channel, self._packageMsg(message, action))
         else:
             self.send("Please join a channel first.")
             self.send("Use command: /join a_channel")
@@ -56,7 +68,7 @@ class ChatProcessor(BaseProcessor, NickCommandsMixin):
 
         # leave current room
         if channel_name != self.channel:
-            self.do_leave()
+            self.do_leave(quiet=True)
 
         self.channel = channel_name
         if self.redis.sismember(channel_name, self.username):
@@ -70,7 +82,7 @@ class ChatProcessor(BaseProcessor, NickCommandsMixin):
 
             self.send("entering room: {}".format(channel_name))
             self.do_users()
-            self.publishMessage("* new user joined chat: {}".format(self.username))
+            self.publishMessage("* new user joined chat: {}".format(self.username), JOIN)
             self.pubsub.subscribe(**{channel_name: self.onMessage})
             if self.thread:
                 self.thread.stop()
@@ -86,7 +98,7 @@ class ChatProcessor(BaseProcessor, NickCommandsMixin):
                     if username != self.username
                     else ' * {} (this is you)'.format(username)
                  for username in members]
-        lines.insert(0, 'room members:')
+        lines.insert(0, 'room members: ({} users)'.format(len(members)))
         self.send('\n'.join(lines))
 
     def do_room(self, args=None):
@@ -96,12 +108,13 @@ class ChatProcessor(BaseProcessor, NickCommandsMixin):
         else:
             self.send("You are in room {}".format(self.channel))
 
-    def _packageMsg(self, text):
+    def _packageMsg(self, text, action=TALK):
         """Helper to build publishable user action"""
         msg_packet = {
             'user': str(self.uuid),
             'username': self.username,
             'timestamp': arrow.utcnow().isoformat(),
+            'action': action,
             'text': text}
         return json.dumps(msg_packet)
 
@@ -112,20 +125,25 @@ class ChatProcessor(BaseProcessor, NickCommandsMixin):
 
     def onMessage(self, message):
         """Redis callback when subscribed channel updates come in"""
-        print(message)
         self.log(logging.INFO, "Received published message: {}".format(message))
         msg_packet = json.loads(message['data'])
-        text = "{username}: {text}".format(username=msg_packet['username'], text=msg_packet['text'])
+        if msg_packet['action'] in (JOIN, LEAVE):
+            text = str(msg_packet['text'])
+        else:
+            text = "{username}: {text}".format(username=msg_packet['username'], text=msg_packet['text'])
         if msg_packet['user'] != str(self.uuid):
             self.send(text)
 
-    def do_leave(self, args=None):
+    def do_leave(self, args=None, quiet=False):
         """Leave a channel"""
         if self.channel:
+            leave_msg = " * user has left chat: {}".format(self.username)
             self.log(logging.INFO, "Left {channel}".format(channel=self.channel))
+            self.publishMessage(leave_msg, LEAVE)
             self.redis.srem(self.channel, self.username)
             self.pubsub.unsubscribe(self.channel)
-            self.send("left {}".format(self.channel))
+            if not quiet:
+                self.send(leave_msg + " (** this is you)")
         self.channel = None
 
     def handleCommand(self, cmd, args):

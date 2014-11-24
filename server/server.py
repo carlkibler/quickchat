@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 
-from twisted.internet import reactor, protocol, endpoints
-from twisted.protocols import basic
 import uuid
 import logging
-import processors
-import redis
+import sys
 from uuid import getnode as get_mac
+
+from twisted.internet import reactor, protocol, endpoints
+from twisted.protocols import basic
+import redis
+
+import processors
 from config import REDIS, SERVER
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG,
@@ -50,6 +54,8 @@ class PubProtocol(basic.LineReceiver, RedisConnectorMixin):
         self.cycleProcessors()
 
     def connectionLost(self, reason):
+        if self.current_processor:
+            self.current_processor.stop()
         self.log(logging.INFO, "Client disconnected".format(uuid=self.uuid))
         self.factory.clients.remove(self)
 
@@ -79,7 +85,7 @@ class PubProtocol(basic.LineReceiver, RedisConnectorMixin):
         self.username = username
 
 
-class PubFactory(protocol.Factory, RedisConnectorMixin):
+class ClientFactory(protocol.Factory, RedisConnectorMixin):
     def __init__(self):
         self.clients = set()
         self.redis = self.getRedisConnection(REDIS)
@@ -89,6 +95,9 @@ class PubFactory(protocol.Factory, RedisConnectorMixin):
 
     def buildProtocol(self, addr):
         return PubProtocol(self, REDIS)
+
+    def reset_db(self):
+        self.redis.flushdb()
 
     def __del__(self):
         # deregister server
@@ -101,5 +110,12 @@ class PubFactory(protocol.Factory, RedisConnectorMixin):
 
 if __name__ == '__main__':
     print("Starting server on port 9399")
-    endpoints.serverFromString(reactor, "tcp:{}".format(SERVER['PORT'])).listen(PubFactory())
+    logger.info("Starting server on port 9399")
+    factory = ClientFactory()
+    endpoints.serverFromString(reactor, "tcp:{}".format(SERVER['PORT'])).listen(factory)
+    if '-clear' in sys.argv:
+        print("Clearing redis DB")
+        logger.info("Clearing redis DB")
+        factory.reset_db()
+
     reactor.run()
