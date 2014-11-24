@@ -61,6 +61,8 @@ class PubProtocol(basic.LineReceiver, RedisConnectorMixin):
 
     def lineReceived(self, line):
         """Process user-sent messages with current processor object"""
+        if not self.current_processor:
+            self.respondToUser("Session terminated. Please reconnect.")
         try:
             self.current_processor.handleInput(line)
         except Exception as e:
@@ -72,6 +74,7 @@ class PubProtocol(basic.LineReceiver, RedisConnectorMixin):
         if not self.current_processor or self.current_processor.isFinished():
             if not self.processors:
                 self.respondToUser("Closing connection")
+                self.current_processor = None
             else:
                 self.current_processor = self.processors.pop(0)
                 self.log(logging.INFO, "Activating {} processor".format(self.current_processor.log_key))
