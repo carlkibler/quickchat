@@ -8,6 +8,6 @@ SERVER = {
 
 REDIS = {
     'HOST': 'pub-redis-17292.us-east-1-3.4.ec2.garantiadata.com',
-    'PASSWORD': 'weeby',
+    'PASSWORD': '',
     'PORT': 17292,
     }
